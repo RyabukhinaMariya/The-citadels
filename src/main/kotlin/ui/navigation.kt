@@ -43,7 +43,7 @@ fun MainNavigation() {
         AppScreen.START_MENU -> {
             GameStartScreen(onGameStart = { registeredPlayers ->
                 players = registeredPlayers
-                currentScreen = AppScreen.IN_GAME
+                currentScreen = AppScreen.CARD_SETUP
 
             })
         }
