@@ -125,7 +125,6 @@ fun CardSetupScreen(
     var currentCardsList by remember { mutableStateOf(listOf<IDistrict>()) }
     var errorMessage by remember { mutableStateOf("") }
 
-    // ИСПОЛЬЗУЕМ mutableStateMapOf ДЛЯ РЕАКТИВНОСТИ
     val districtCards = remember {
         mutableStateMapOf<IDistrict, Int>().apply { putAll(initialDistricts) }
     }
