@@ -82,7 +82,7 @@ class GameSession() {
             while (true) {
                 val input = ConsoleInput().readInput().toIntOrNull()
                 if (input != null && input in 4..7) return@run input
-                println("\nВведите корректное число (4-7):")
+                println("\nВведите корректное число (4-7): ")
             }
         }
 
@@ -97,8 +97,8 @@ class GameSession() {
                         players.add(player)
                         getStartCards(player)
                         break
-                    } else println("Это имя уже занято.")
-                } else println("Имя не может быть пустым.")
+                    } else println("\nЭто имя уже занято.")
+                } else println("\nИмя не может быть пустым.")
             }
         }
 
@@ -141,7 +141,7 @@ class GameSession() {
 
             if (inRound != "N") {
                 val player = players.find { it.name == inRound }
-                character.ability(player, players, quarterPool)
+                character.ability(player as Player?, players, quarterPool)
                 println("Игрок берет монеты (M) или карты (C)?:")
                 if (ConsoleInput().readInput() == "M") {
                     player?.gold += 2
@@ -154,8 +154,17 @@ class GameSession() {
 
                 println("Игрок строит здание?(Y/N)")
                 if (ConsoleInput().readInput() == "Y") {
+                    val card = run {
+                        while (true) {
+                            val input = ConsoleInput().readInput()
+                            if ((player?.hand?.find { it.name.equals(input, ignoreCase = true) } != null) || input == "N") {
+                                return@run input
+                            }
 
-                    player?.build()
+                            println("\nВведите корректный ответ (ник или N):")
+                        }
+                    }
+                    player?.build(card as IDistrict)
                 }
 
                 if (player?.city?.size as Int >= 7) {
