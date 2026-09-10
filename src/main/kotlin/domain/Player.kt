@@ -25,25 +25,11 @@ class Player(override val name: String, override val id: Int) : IPlayer {
         return gold >= district.cost
     }
 
-    override fun build () {
-        println("\nВведите название карты, которую хотите построить:")
-        val districtCard = run {
-            while (true) {
-                val input = ConsoleInput().readInput()
-                val districtCard = hand.find { it.name.equals(input, true) }
-                if (districtCard != null && (districtCard.cost <= gold)) {
-                    return@run districtCard
-                }
-
-                println("\nВведите корректное название карты")
-            }
-        }
-
-        gold -= (districtCard as IDistrict).cost
-        hand.remove(districtCard)
-        city.add(districtCard)
+    override fun build (district: IDistrict) {
+        gold -= district.cost
+        hand.remove(district)
+        city.add(district)
     }
-
     override fun discardFromHand(district: IDistrict) {
         hand.remove(district)
     }
