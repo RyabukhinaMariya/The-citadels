@@ -1,176 +1,359 @@
 package engine
 
+import database.DatabaseManager
+import database.DatabaseManager.addResults
 import domain.GameCharacters.getByOrder
 import domain.IDistrict
 import domain.IPlayer
 import domain.Player
 import models.CitadelConfig
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.update
 
-interface InputProvider {
-    fun readInput(): String
+//phases of the game
+enum class GamePhase {
+    SETUP_PLAYERS,
+    ROUND_START,
+    CHARACTER_CALL,
+    SPECIAL_ABILITY,
+    ACTION_CHOICE,
+    BUILD_CHOICE,
+    SELECT_CARD,
+    GAME_OVER
 }
 
-class ConsoleInput : InputProvider {
-    override fun readInput() = readln()
+sealed class AbilityDialogState {
+    object None : AbilityDialogState()
 }
+
+data class GameState(
+    val phase: GamePhase = GamePhase.SETUP_PLAYERS,
+    val players: List<IPlayer> = emptyList(),
+    val currentCharacterIndex: Int = 1,
+    val activePlayer: IPlayer? = null,
+    val activeCharacterName: String = "",
+    val message: String = "",
+    val abilityDialog: AbilityDialogState = AbilityDialogState.None
+)
 
 class QuarterPool(initialDistricts: Map<IDistrict, Int>) {
     val districtCards = initialDistricts.toMutableMap()
 
-    fun findDistrictCard(cardName: String?): IDistrict? {
-        val district = districtCards.keys.find { it.name == cardName }
-        if (district != null && ((districtCards[district] ?: 0) > 0)) {
-            return district
-        }
-        return null
+    fun getAvailableCards(): List<IDistrict> {
+        return districtCards.filter { it.value > 0 }.keys.toList()
     }
-
-    fun drawCard(): IDistrict {
-        println("\nВведите название вытянутой карты")
-        val district = run {
-            while (true) {
-                val input = ConsoleInput().readInput()
-                val found = findDistrictCard(input)
-                if (found != null) {
-                    return@run found
-                }
-
-                println("\nВведите корректное название карты")
-            }
-        }
-
+    
+    fun drawCard(district: IDistrict) {
         val currentCount = districtCards[district] ?: 0
-        districtCards[district as IDistrict]  = currentCount - 1
-        return district
-    }
-
-    // возвращение карты в колоду
-    fun discardCard(player: IPlayer?): IDistrict {
-        println("\nВведите название сбрасываемой карты")
-        val districtCard = run {
-            while (true) {
-                val input = ConsoleInput().readInput()
-                val districtCard = player?.hand?.find {it.name.equals(input, true)}
-                if (districtCard != null) {
-                    return@run districtCard
-                }
-
-                println("\nВведите корректное название карты")
-            }
+        if (currentCount > 0) {
+            districtCards[district] = currentCount - 1
         }
-
-        val currentCount = districtCards[districtCard] ?: 0
-        districtCards[districtCard as IDistrict]  = currentCount + 1
-        return districtCard
+    }
+    
+    fun discardCard(district: IDistrict) {
+        val currentCount = districtCards[district] ?: 0
+        districtCards[district] = currentCount + 1
     }
 }
 
-class GameSession() {
+class GameSession {
     private val quarterPool = QuarterPool(CitadelConfig.getBaseDeck())
-    private val players = mutableListOf<IPlayer>()
-    private var isGameOver = false
+    private val _players = mutableListOf<IPlayer>()
+    private var isGameOverFlag = false
 
-    fun getStartCards(player: IPlayer) {
+    private val _gameState = MutableStateFlow(GameState())
+    val gameState: StateFlow<GameState> = _gameState
+
+    fun addPlayer(name: String) {
+        if (_gameState.value.phase != GamePhase.SETUP_PLAYERS) return
+        if (name.isBlank() || _players.any { it.name.equals(name, ignoreCase = true) }) {
+            updateMessage("Имя пустое или уже занято!")
+            return
+        }
+        if (_players.size >= 7) {
+            updateMessage("Максимум 7 игроков.")
+            return
+        }
+
+        val player = Player(name = name, id = _players.size + 1)
+        _players.add(player)
+        DatabaseManager.registerOrGetPlayer(name)
+
+        // переделать на еще экран
+        val available = quarterPool.getAvailableCards()
         for (i in 0..3) {
-            player.addToHand(quarterPool.drawCard())
+            if (available.size > i) {
+                val card = available[i]
+                player.addToHand(card)
+                quarterPool.drawCard(card)
+            }
+        }
+
+        _gameState.update { it.copy(players = _players.toList(), message = "Игрок $name добавлен.") }
+    }
+
+    fun startGame() {
+        if (_players.size < 4) {
+            updateMessage("Нужно минимум 4 игрока для старта.")
+            return
+        }
+        _gameState.update { it.copy(phase = GamePhase.ROUND_START, currentCharacterIndex = 1) }
+        round()
+    }
+
+    //round
+
+    private fun round() {
+        if (isGameOverFlag) {
+            finishGame()
+            return
+        }
+
+        var index = _gameState.value.currentCharacterIndex
+        var character = getByOrder(index)
+
+        //searching for next alive character
+        while (index <= 8) {
+            character = getByOrder(index)
+            if (character != null && !character.isKilled) break
+            index++
+        }
+
+        if (index > 8 || character == null) {
+            //end of the round
+            _gameState.update { it.copy(currentCharacterIndex = 1, phase = GamePhase.ROUND_START) }
+            round()
+            return
+        }
+
+        _gameState.update {
+            it.copy(
+                phase = GamePhase.CHARACTER_CALL,
+                currentCharacterIndex = index,
+                activeCharacterName = character.name,
+                activePlayer = null,
+                message = "Персонаж ${character.name}. Кто за него играет? (Выберите игрока или пропуск)"
+            )
         }
     }
 
-    fun setupGame() {
-        println("=== Введите количество игроков (4-7): ===")
-        val playerCount = run {
-            while (true) {
-                val input = ConsoleInput().readInput().toIntOrNull()
-                if (input != null && input in 4..7) return@run input
-                println("\nВведите корректное число (4-7):")
-            }
+    fun confirmCharacterPlayer(playerId: Int?) {
+        if (_gameState.value.phase != GamePhase.CHARACTER_CALL) return
+
+        if (playerId == null) {
+            _gameState.update { it.copy(currentCharacterIndex = it.currentCharacterIndex + 1) }
+            round()
+            return
         }
 
-        println("\n=== Регистрация игроков ===")
-        for (i in 1..playerCount as Int) {
-            while (true) {
-                print("\nВведите имя для игрока №$i: ")
-                val name = ConsoleInput().readInput()
-                if (name.isNotBlank()) {
-                    if (players.none { it.name.equals(name, ignoreCase = true) }) {
-                        val player = Player(name = name, id = i)
-                        players.add(player)
-                        getStartCards(player)
-                        break
-                    } else println("Это имя уже занято.")
-                } else println("Имя не может быть пустым.")
-            }
-        }
+        val player = _players.find { it.id == playerId }
+        val character = getByOrder(_gameState.value.currentCharacterIndex)
 
-        println("\nИгра создана! Участники: ${players.joinToString { it.name }}")
-        gameLoop(false)
-    }
+        character?.ability(player as Player?, _players, quarterPool)
 
-    fun gameLoop(isGameOver: Boolean) {
-        while (!isGameOver) {
-            println("\n--- Начало нового раунда ---")
-            playRound()
-        }
-        showFinalResults()
-    }
-
-    fun playRound() {
-        println("\n--- Раздайте карты и выберите персонажей ---")
-
-        for (i in 1..8) {
-            val character = getByOrder(i) ?: continue
-
-            if (character.isKilled) {
-                println("\nПерсонаж ${character.name} убит и пропускает раунд.")
-                continue
-            }
-
-            println("\n--- Ход персонажа: ${character.name} ---")
-
-            println("Персонаж ${character.name} в игре? Введите его ник, или N:")
-            val inRound = run {
-                while (true) {
-                    val input = ConsoleInput().readInput()
-                    if ((players.find { it.name.equals(input, ignoreCase = true) } != null) || input == "N") {
-                        return@run input
-                    }
-
-                    println("\nВведите корректный ответ (ник или N):")
-                }
-            }
-
-            if (inRound != "N") {
-                val player = players.find { it.name == inRound }
-                character.ability(player, players, quarterPool)
-                println("Игрок берет монеты (M) или карты (C)?:")
-                if (ConsoleInput().readInput() == "M") {
-                    player?.gold += 2
-                    println("${player?.name} получил 2 золотых (Всего: ${player?.gold})")
-                } else {
-                    val drawn = quarterPool.drawCard()
-                    player?.addToHand(drawn)
-                    println("${player?.name} вытянул карту: ${drawn.name}")
-                }
-
-                println("Игрок строит здание?(Y/N)")
-                if (ConsoleInput().readInput() == "Y") {
-
-                    player?.build()
-                }
-
-                if (player?.city?.size as Int >= 7) {
-                    isGameOver = true
-                }
-            }
+        _gameState.update {
+            it.copy(
+                phase = GamePhase.ACTION_CHOICE,
+                activePlayer = player,
+                message = "${player?.name}, возьмите 2 золотых или вытяните карту."
+            )
         }
     }
 
-    private fun showFinalResults() {
-        println("\n=== ИГРА ОКОНЧЕНА. РЕЗУЛЬТАТЫ: ===")
-        players.sortedByDescending { it.city.sumOf { district -> district.cost } }
-            .forEach { player ->
-                val score = player.city.sumOf { it.cost }
-                println("Игрок ${player.name}: $score очков")
+    fun skipAbility() {
+        val activePlayer = _gameState.value.activePlayer
+        updateMessage("Игрок ${activePlayer?.name} пропустил использование способности.")
+
+        _gameState.update { currentState ->
+            currentState.copy(
+                phase = GamePhase.BUILD_CHOICE
+            )
+        }
+    }
+
+    fun takeGold() {
+        val player = _gameState.value.activePlayer ?: return
+        player.gold += 2
+
+        _gameState.update {
+            it.copy(
+                phase = GamePhase.BUILD_CHOICE,
+                players = _players.toList(),
+                message = "${player.name} получил 2 золотых. Хотите построить квартал?"
+            )
+        }
+    }
+
+    fun startSelectCardPhase() {
+        _gameState.update { it.copy(phase = GamePhase.SELECT_CARD) }
+    }
+
+    fun confirmSelectedCard(selectedCardName: String) {
+        val activePlayer = _gameState.value.activePlayer
+        val avlCards = quarterPool.getAvailableCards()
+
+        val foundCard = avlCards.find { it.name == selectedCardName }
+
+        if (foundCard == null) {
+            updateMessage("Карта \"$selectedCardName\" не найдена в колоде! Проверьте правильность названия.")
+            return
+        }
+
+        activePlayer?.addToHand(foundCard)
+        quarterPool.drawCard(foundCard)
+
+        updateMessage("Игрок ${activePlayer?.name} получил карту \"${foundCard.name}\".")
+
+        _gameState.update { currentState ->
+            currentState.copy(
+                phase = GamePhase.BUILD_CHOICE
+            )
+        }
+    }
+
+    fun buildDistrict(district: IDistrict?) {
+        val player = _gameState.value.activePlayer ?: return
+
+        if (district != null && player.gold >= district.cost) {
+            player.build(district)
+            _gameState.update {
+                it.copy(
+                    currentCharacterIndex = it.currentCharacterIndex + 1,
+                    players = _players.toList()
+                )
             }
+        }
+        if (player.city.size >= 7) {
+            isGameOverFlag = true
+        }
+        round()
+    }
+
+    //Final of the game
+
+    private fun finishGame() {
+        _players.sortByDescending { it.city.sumOf { district -> district.cost } }
+
+        val results = _players.joinToString("\n") { player ->
+            "${player.name}: ${player.city.sumOf { it.cost }} очков"
+        }
+
+        val winner = _players.firstOrNull()
+        val winnerScore = winner?.city?.sumOf { it.cost } ?: 0
+
+        if (winner != null) {
+            addResults(
+                players = _players,
+                winner = winner,
+                score = winnerScore
+            )
+        }
+
+        _gameState.update {
+            it.copy(
+                phase = GamePhase.GAME_OVER,
+                message = "ИГРА ОКОНЧЕНА. РЕЗУЛЬТАТЫ:\n$results"
+            )
+        }
+    }
+
+    private fun updateMessage(msg: String) {
+        _gameState.update { it.copy(message = msg) }
+    }
+
+    //abilities
+
+    fun triggerActiveCharacterAbility() {
+        val activePlayer = _gameState.value.activePlayer
+        val character = domain.GameCharacters.getByOrder(_gameState.value.currentCharacterIndex)
+
+        if (character == null) {
+            skipAbility()
+            return
+        }
+        if (character.rank in 4..7) {
+            character.ability(activePlayer as Player?, _players, quarterPool)
+            _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
+        } else {
+            _gameState.update { it.copy(phase = GamePhase.SPECIAL_ABILITY) }
+        }
+    }
+
+    fun applyAssassinAbility(targetRank: Int) {
+        val victim = getByOrder(targetRank)
+        victim?.isKilled = true
+        updateMessage(if (victim != null) "Ассасин убил персонажа: ${victim.name}" else "Никого не убили.")
+        _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
+    }
+
+    fun applyThiefAbility(targetRank: Int) {
+        val victimChar = domain.GameCharacters.getByOrder(targetRank)
+        if (victimChar == null || victimChar.isKilled) {
+            updateMessage("Нельзя ограбить этого персонажа (не в игре или убит).")
+            _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
+            return
+        }
+        updateMessage("Вор выбрал целью персонажа ранга $targetRank.")
+        _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
+    }
+
+    fun applySorcererSwap(targetName: String) {
+        val activePlayer = _gameState.value.activePlayer ?: return
+        val targetPlayer = _players.find { it.name.equals(targetName.trim(), ignoreCase = true) }
+
+        if (targetPlayer == null) {
+            updateMessage("Игрок \"$targetName\" не найден!")
+            return
+        }
+
+        if (targetPlayer == activePlayer) {
+            updateMessage("Нельзя обменяться картами самим с собой!")
+            return
+        }
+
+        val myHand = activePlayer.hand.toList()
+        val targetHand = targetPlayer.hand.toList()
+
+        activePlayer.replaceHand(targetHand)
+        targetPlayer.replaceHand(myHand)
+
+        updateMessage("Чародей ${activePlayer.name} успешно обменялся картами с игроком ${targetPlayer.name}!")
+
+        _gameState.update { currentState ->
+            currentState.copy(
+                phase = GamePhase.BUILD_CHOICE
+            )
+        }
+    }
+
+    fun applyWarlordDestroy(targetPlayerName: String, districtName: String) {
+        val activePlayer = _gameState.value.activePlayer ?: return
+        val targetPlayer = _players.find { it.name.equals(targetPlayerName, ignoreCase = true) }
+
+        if (targetPlayer == null) {
+            updateMessage("Игрок не найден.")
+            return
+        }
+
+        val district = targetPlayer.city.find { it.name.equals(districtName, ignoreCase = true) }
+        if (district == null) {
+            updateMessage("У указанного игрока нет такого здания в городе.")
+            return
+        }
+
+        val costToDestroy = district.cost - 1
+        if (activePlayer.gold < costToDestroy) {
+            updateMessage("Недостаточно золота для разрушения (требуется ${costToDestroy}).")
+            return
+        }
+
+        activePlayer.gold -= costToDestroy
+        targetPlayer.discardFromHand(district)
+        quarterPool.discardCard(district)
+
+        updateMessage("Кондотьер разрушил здание ${district.name} у игрока ${targetPlayer.name}!")
+        _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
     }
 }
+
