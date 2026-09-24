@@ -215,7 +215,7 @@ fun BuildAndAbilityScreen(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text("Ходит: ${activePlayer?.name}", color = Color.White, fontSize = 20.sp)
-            Text("Золото: ${activePlayer?.gold} 🪙", color = Color(0xFFFFD700), fontSize = 20.sp)
+            Text("Золото: ${activePlayer?.gold}", color = Color(0xFFFFD700), fontSize = 20.sp)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -225,7 +225,7 @@ fun BuildAndAbilityScreen(
             colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFAB47BC)),
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("✨ Активировать способность персонажа", color = Color.White, fontSize = 16.sp)
+            Text("Активировать способность персонажа", color = Color.White, fontSize = 16.sp)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -269,7 +269,7 @@ fun DistrictCardView(district: IDistrict, onClick: () -> Unit) {
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Text(district.name, color = Color.White, fontWeight = FontWeight.Bold)
-            Text("Цена: ${district.cost} 🪙", color = Color(0xFFFFD700))
+            Text("Цена: ${district.cost}", color = Color(0xFFFFD700))
             Text("Цвет: ${district.color}", color = Color.LightGray, fontSize = 12.sp)
         }
     }
@@ -283,7 +283,7 @@ fun GameOverScreen(results: String) {
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxSize()
     ) {
-        Text("🏆 Игра окончена!", color = Color(0xFFFFD700), fontSize = 28.sp)
+        Text("Игра окончена!", color = Color(0xFFFFD700), fontSize = 28.sp)
         Spacer(modifier = Modifier.height(16.dp))
         Text(results, color = Color.White, fontSize = 18.sp)
     }
