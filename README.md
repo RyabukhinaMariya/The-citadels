@@ -1,7 +1,5 @@
-classDiagram
-    direction LR
+##Citadels game
 ``mermaid
-
     class ICard {
         <<interface>>
         +String name
