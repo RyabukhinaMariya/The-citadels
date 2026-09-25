@@ -1,6 +1,6 @@
-##Citadels game
+****###Citadels game
 
-``mermaid
+```mermaid
 classDiagram
 
     class ICard {
