@@ -1,5 +1,8 @@
 ##Citadels game
+
 ``mermaid
+classDiagram
+
     class ICard {
         <<interface>>
         +String name
