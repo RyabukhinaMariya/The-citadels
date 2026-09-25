@@ -13,7 +13,7 @@ interface IPlayer: ICard {
     fun destroyBuilding(district: IDistrict)
     fun addToHand(district: IDistrict)
     fun replaceHand(list: List<IDistrict>)
-    fun build()
+    fun build(district: IDistrict)
 }
 
 class Player(override val name: String, override val id: Int) : IPlayer {
@@ -44,8 +44,6 @@ class Player(override val name: String, override val id: Int) : IPlayer {
 
     override fun replaceHand(list: List<IDistrict>) {
         hand.clear()
-        for (city in list) {
-            addToHand(city)
-        }
+        hand.addAll(list)
     }
 }
