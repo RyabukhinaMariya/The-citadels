@@ -100,7 +100,6 @@ private fun PhaseRouter(state: GameState, session: GameSession) {
         GamePhase.BUILD_CHOICE -> BuildAndAbilityScreen(session, state.activePlayer)
         GamePhase.GAME_OVER -> GameOverScreen(state.message)
         GamePhase.SELECT_CARD -> SelectCardScreen { name -> session.confirmSelectedCard(name) }
-        GamePhase.LEADERBOARD -> LeaderboardScreen(session)
         else -> error("Unknown phase")
     }
 }
@@ -147,7 +146,6 @@ private object SetupDimens {
     val SectionSpacing = 12.dp
     val ListSpacing = 20.dp
     val ButtonSpacing = 12.dp
-    val LeaderboardBottomPadding = 20.dp
 }
 
 // 1. Register screen
@@ -272,71 +270,6 @@ private fun setupTextFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
     focusedBorderColor = Color(0xFFFFB74D),
     unfocusedBorderColor = Color.Gray
 )
-
-@Composable
-fun LeaderboardScreen(session: GameSession) {
-    val leaderboard = remember { DatabaseManager.getLeaderboard() }
-
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.fillMaxSize().padding(16.dp)
-    ) {
-        Text(
-            text = "Таблица лидеров",
-            color = Color(0xFFFFD54F),
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        if (leaderboard.isEmpty()) {
-            Text("История игр пока пуста", color = Color.Gray, fontSize = 16.sp)
-        } else {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF37474F), RoundedCornerShape(4.dp))
-                    .padding(12.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("Игрок", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(2f))
-                Text("Сыграно", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                Text("Победы", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyColumn(modifier = Modifier.weight(1f)) {
-                items(leaderboard) { stats ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 4.dp)
-                            .background(Color(0xFF263238), RoundedCornerShape(4.dp))
-                            .padding(12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(stats.name, color = Color.White, modifier = Modifier.weight(2f))
-                        Text("${stats.gamesPlayed}", color = Color.LightGray, modifier = Modifier.weight(1f))
-                        Text("${stats.wins}", color = Color(0xFFFFD700), modifier = Modifier.weight(1f))
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-
-        Button(
-            onClick = { session.backToSetup() },
-            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF5C6BC0)),
-            modifier = Modifier.fillMaxWidth(0.5f)
-        ) {
-            Text("Назад в меню", color = Color.White)
-        }
-    }
-}
 
 // 2. Character choose screen
 @Composable
@@ -599,10 +532,6 @@ private fun selectCardFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
     cursorColor = Color(0xFFFFB74D)
 )
 
-/**
- * Возвращает текст ошибки или пустую строку, если всё ок.
- * Вынесено из composable — легко тестируется.
- */
 private fun handleCardSubmit(
     input: String,
     onCardSelected: (String) -> Unit
