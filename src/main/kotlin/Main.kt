@@ -100,13 +100,9 @@ private fun PhaseRouter(state: GameState, session: GameSession) {
         GamePhase.BUILD_CHOICE -> BuildAndAbilityScreen(session, state.activePlayer)
         GamePhase.GAME_OVER -> GameOverScreen(state.message)
         GamePhase.SELECT_CARD -> SelectCardScreen { name -> session.confirmSelectedCard(name) }
-        GamePhase.ROUND_START -> RoundStartPlaceholder()
+        GamePhase.LEADERBOARD -> LeaderboardScreen(session)
+        else -> error("Unknown phase")
     }
-}
-
-@Composable
-private fun RoundStartPlaceholder() {
-    // При необходимости — экран «Раунд начинается» или просто пусто
 }
 
 @Composable
@@ -162,6 +158,7 @@ fun SetupScreen(session: GameSession, players: List<IPlayer>) {
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxSize()
     ) {
+        LeaderboardButton(onClick = session::openLeaderboard)
 
         SetupHeader()
 
@@ -204,7 +201,7 @@ private fun LeaderboardButton(onClick: () -> Unit) {
 @Composable
 private fun SetupHeader() {
     Text(
-        "Регистрация участников ($4-7 игроков)",
+        "Регистрация участников (4-7 игроков)",
         color = Color.LightGray,
         fontSize = 20.sp
     )
@@ -275,6 +272,71 @@ private fun setupTextFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
     focusedBorderColor = Color(0xFFFFB74D),
     unfocusedBorderColor = Color.Gray
 )
+
+@Composable
+fun LeaderboardScreen(session: GameSession) {
+    val leaderboard = remember { DatabaseManager.getLeaderboard() }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxSize().padding(16.dp)
+    ) {
+        Text(
+            text = "Таблица лидеров",
+            color = Color(0xFFFFD54F),
+            fontSize = 24.sp,
+            fontWeight = FontWeight.Bold
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (leaderboard.isEmpty()) {
+            Text("История игр пока пуста", color = Color.Gray, fontSize = 16.sp)
+        } else {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF37474F), RoundedCornerShape(4.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Игрок", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(2f))
+                Text("Сыграно", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                Text("Победы", color = Color.White, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            LazyColumn(modifier = Modifier.weight(1f)) {
+                items(leaderboard) { stats ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .background(Color(0xFF263238), RoundedCornerShape(4.dp))
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(stats.name, color = Color.White, modifier = Modifier.weight(2f))
+                        Text("${stats.gamesPlayed}", color = Color.LightGray, modifier = Modifier.weight(1f))
+                        Text("${stats.wins}", color = Color(0xFFFFD700), modifier = Modifier.weight(1f))
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+
+        Button(
+            onClick = { session.backToSetup() },
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF5C6BC0)),
+            modifier = Modifier.fillMaxWidth(0.5f)
+        ) {
+            Text("Назад в меню", color = Color.White)
+        }
+    }
+}
 
 // 2. Character choose screen
 @Composable
