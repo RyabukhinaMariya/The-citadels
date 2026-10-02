@@ -1,6 +1,7 @@
 package domain
 
-interface IPlayer: ICard {
+interface IPlayer{
+    val name: String
     val id: Int
     var gold: Int
     val hand: List<IDistrict>
