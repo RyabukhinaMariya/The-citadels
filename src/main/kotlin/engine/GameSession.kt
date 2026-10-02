@@ -11,6 +11,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import domain.QuarterPool
+import data.GameLogEntry
+import data.MoveType
+import domain.ICharacter
 
 //phases of the game
 enum class GamePhase {
@@ -64,7 +67,6 @@ class GameSession {
         _players.add(player)
         DatabaseManager.registerOrGetPlayer(name)
 
-        // переделать на еще экран
         val available = quarterPool.getAvailableCards()
         for (i in 0..3) {
             if (available.size > i) {
@@ -75,6 +77,7 @@ class GameSession {
         }
 
         _gameState.update { it.copy(players = _players.toList(), message = "Игрок $name добавлен.") }
+        logMove(MoveType.PLAYER_ADDED, "Игрок $name добавлен в игру", playerName = name)
     }
 
     fun startGame() {
@@ -85,6 +88,8 @@ class GameSession {
 
         resetCharactersState()
         _gameState.update { it.copy(phase = GamePhase.ROUND_START, currentCharacterIndex = 1) }
+        logMove(MoveType.GAME_STARTED, "Игра началась (${_players.size} игроков)", playerName = null)
+        round()
     }
 
     private fun resetCharactersState() {
@@ -99,40 +104,60 @@ class GameSession {
             return
         }
 
-        var index = _gameState.value.currentCharacterIndex
-        var character = getByOrder(index)
+        val (nextIndex, nextCharacter) = findNextAliveCharacter(_gameState.value.currentCharacterIndex)
 
-        //searching for next alive character
-        while (index <= 8) {
-            character = getByOrder(index)
-            if (character != null && !character.isKilled) break
-            index++
-        }
-
-        if (index > 8 || character == null) {
-            resetCharactersState()
-            _gameState.update { it.copy(currentCharacterIndex = 1, phase = GamePhase.ROUND_START) }
-            round()
+        if (nextCharacter == null) {
+            startNewRound()
             return
         }
 
+        announceCharacter(nextIndex, nextCharacter)
+    }
+
+    private fun findNextAliveCharacter(startIndex: Int): Pair<Int, ICharacter?> {
+        for (index in startIndex..MAX_CHARACTER_RANK) {
+            val character = getByOrder(index)
+            if (character != null && !character.isKilled) {
+                return index to character
+            }
+        }
+        return MAX_CHARACTER_RANK + 1 to null
+    }
+
+    private fun startNewRound() {
+        resetCharactersState()
+        currentRound++
+        _gameState.update { it.copy(currentCharacterIndex = 1, phase = GamePhase.ROUND_START) }
+        round()
+    }
+
+    private fun announceCharacter(index: Int, character: ICharacter) {
         _gameState.update {
             it.copy(
                 phase = GamePhase.CHARACTER_CALL,
                 currentCharacterIndex = index,
                 activeCharacterName = character.name,
                 activePlayer = null,
-                message = "Персонаж ${character.name}. Кто за него играет? (Выберите игрока или пропуск)"
+                message = "Персонаж ${character.name}. Кто за него играет?"
             )
         }
+        logMove(
+            MoveType.CHARACTER_CALLED,
+            "Вызван персонаж: ${character.name}",
+            characterName = character.name,
+            playerName = null
+        )
+    }
+
+    companion object {
+        private const val MAX_CHARACTER_RANK = 8
     }
 
     fun confirmCharacterPlayer(playerId: Int?) {
         if (_gameState.value.phase != GamePhase.CHARACTER_CALL) return
 
         if (playerId == null) {
-            _gameState.update { it.copy(currentCharacterIndex = it.currentCharacterIndex + 1) }
-            round()
+            handleCharacterSkipped()
             return
         }
 
@@ -141,24 +166,45 @@ class GameSession {
             return
         }
 
+        applyThiefRobberyIfNeeded(player)
+        moveToActionChoice(player)
+    }
+
+    private fun handleCharacterSkipped() {
+        logMove(
+            MoveType.CHARACTER_SKIPPED,
+            "Персонаж ${_gameState.value.activeCharacterName} никем не взят",
+            playerName = null
+        )
+        _gameState.update { it.copy(currentCharacterIndex = it.currentCharacterIndex + 1) }
+        round()
+    }
+
+    private fun applyThiefRobberyIfNeeded(victim: IPlayer) {
         val currentRank = _gameState.value.currentCharacterIndex
+        if (currentRank != thiefTargetRank) return
 
-        if (currentRank == thiefTargetRank) {
-            val thief = _players.find { p ->
-                p.name == thiefName
-            }
-            val stolen = player.gold
-            player.gold = 0
-            thief?.let { it.gold += stolen }
-            updateMessage("Вор ограбил ${player.name} на $stolen золотых!")
-            thiefTargetRank = null
-        }
+        val thief = _players.find { it.name == thiefName }
+        val stolen = victim.gold
+        victim.gold = 0
+        thief?.let { it.gold += stolen }
 
+        updateMessage("Вор ограбил ${victim.name} на $stolen золотых!")
+        logMove(
+            MoveType.PLAYER_ROBBED,
+            "Вор ($thiefName) ограбил ${victim.name} на $stolen золотых",
+            characterName = "Вор",
+            playerName = thiefName
+        )
+        thiefTargetRank = null
+    }
+
+    private fun moveToActionChoice(player: IPlayer) {
         _gameState.update {
             it.copy(
                 phase = GamePhase.ACTION_CHOICE,
                 activePlayer = player,
-                message = "${player?.name}, возьмите 2 золотых или вытяните карту."
+                message = "${player.name}, возьмите 2 золотых или вытяните карту."
             )
         }
     }
@@ -177,12 +223,19 @@ class GameSession {
     fun takeGold() {
         val player = _gameState.value.activePlayer ?: return
         player.gold += 2
+        logMove(MoveType.GOLD_TAKEN, "${player.name} взял 2 золотых")
 
+        moveToBuildChoice(
+            message = "${player.name} получил 2 золотых. Хотите построить квартал?"
+        )
+    }
+
+    private fun moveToBuildChoice(message: String = _gameState.value.message) {
         _gameState.update {
             it.copy(
                 phase = GamePhase.BUILD_CHOICE,
                 players = _players.toList(),
-                message = "${player.name} получил 2 золотых. Хотите построить квартал?"
+                message = message
             )
         }
     }
@@ -204,6 +257,7 @@ class GameSession {
 
         activePlayer?.addToHand(foundCard)
         quarterPool.drawCard(foundCard)
+        logMove(MoveType.CARD_DRAWN, "${activePlayer?.name} взял карту \"${foundCard.name}\"")
 
         updateMessage("Игрок ${activePlayer?.name} получил карту \"${foundCard.name}\".")
 
@@ -219,6 +273,7 @@ class GameSession {
 
         if (district != null && player.gold >= district.cost) {
             player.build(district)
+            logMove(MoveType.DISTRICT_BUILT, "${player.name} построил ${district.name} (цена ${district.cost})")
         }
         if (player.city.size >= 7) {
             isGameOverFlag = true
@@ -253,6 +308,12 @@ class GameSession {
             )
         }
 
+        logMove(
+            MoveType.GAME_OVER,
+            "Игра окончена. Победитель: ${winner?.name} (${winnerScore} очков)",
+            playerName = winner?.name
+        )
+
         _gameState.update {
             it.copy(
                 phase = GamePhase.GAME_OVER,
@@ -286,7 +347,14 @@ class GameSession {
     fun applyAssassinAbility(targetRank: Int) {
         val victim = getByOrder(targetRank)
         victim?.isKilled = true
-        updateMessage(if (victim != null) "Ассасин убил персонажа: ${victim.name}" else "Никого не убили.")
+        val msg = if (victim != null) "Ассасин убил персонажа: ${victim.name}" else "Никого не убили."
+        updateMessage(msg)
+        logMove(
+            MoveType.PLAYER_KILLED,
+            msg,
+            characterName = "Ассасин",
+            playerName = _gameState.value.activePlayer?.name
+        )
         _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
     }
 
@@ -305,66 +373,95 @@ class GameSession {
         }
 
         thiefTargetRank = targetRank
+        thiefName = _gameState.value.activePlayer?.name
         updateMessage("Вор выбрал целью персонажа ранга $targetRank.")
+        logMove(
+            MoveType.ABILITY_USED,
+            "Вор выбрал целью персонажа ранга $targetRank",
+            characterName = "Вор",
+            playerName = _gameState.value.activePlayer?.name
+        )
         _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
     }
 
     fun applySorcererSwap(targetName: String) {
         val activePlayer = _gameState.value.activePlayer ?: return
-        val targetPlayer = _players.find { it.name.equals(targetName.trim(), ignoreCase = true) }
-
-        if (targetPlayer == null) {
-            updateMessage("Игрок \"$targetName\" не найден!")
-            return
-        }
+        val targetPlayer = findPlayerByName(targetName) ?: return
 
         if (targetPlayer == activePlayer) {
             updateMessage("Нельзя обменяться картами самим с собой!")
             return
         }
 
-        val myHand = activePlayer.hand.toList()
-        val targetHand = targetPlayer.hand.toList()
+        performHandSwap(activePlayer, targetPlayer)
+        moveToBuildChoice()
+    }
 
-        activePlayer.replaceHand(targetHand)
-        targetPlayer.replaceHand(myHand)
+    private fun performHandSwap(playerA: IPlayer, playerB: IPlayer) {
+        val handA = playerA.hand.toList()
+        val handB = playerB.hand.toList()
 
-        updateMessage("Чародей ${activePlayer.name} успешно обменялся картами с игроком ${targetPlayer.name}!")
+        playerA.replaceHand(handB)
+        playerB.replaceHand(handA)
 
-        _gameState.update { currentState ->
-            currentState.copy(
-                phase = GamePhase.BUILD_CHOICE
-            )
-        }
+        updateMessage("Чародей ${playerA.name} успешно обменялся картами с игроком ${playerB.name}!")
+        logMove(
+            MoveType.HAND_SWAPPED,
+            "Чародей ${playerA.name} обменялся картами с ${playerB.name}",
+            characterName = "Чародей",
+            playerName = playerA.name
+        )
     }
 
     fun applyWarlordDestroy(targetPlayerName: String, districtName: String) {
         val activePlayer = _gameState.value.activePlayer ?: return
-        val targetPlayer = _players.find { it.name.equals(targetPlayerName, ignoreCase = true) }
-
-        if (targetPlayer == null) {
-            updateMessage("Игрок не найден.")
-            return
-        }
-
-        val district = targetPlayer.city.find { it.name.equals(districtName, ignoreCase = true) }
-        if (district == null) {
-            updateMessage("У указанного игрока нет такого здания в городе.")
-            return
-        }
+        val targetPlayer = findPlayerByName(targetPlayerName) ?: return
+        val district = findDistrictInCity(targetPlayer, districtName) ?: return
 
         val costToDestroy = district.cost - 1
-        if (activePlayer.gold < costToDestroy) {
-            updateMessage("Недостаточно золота для разрушения (требуется ${costToDestroy}).")
-            return
-        }
+        if (!canAffordDestruction(activePlayer, costToDestroy)) return
 
-        activePlayer.gold -= costToDestroy
+        performDestruction(activePlayer, targetPlayer, district, costToDestroy)
+    }
+
+    private fun findPlayerByName(name: String): IPlayer? {
+        val player = _players.find { it.name.equals(name, ignoreCase = true) }
+        if (player == null) updateMessage("Игрок не найден.")
+        return player
+    }
+
+    private fun findDistrictInCity(player: IPlayer, districtName: String): IDistrict? {
+        val district = player.city.find { it.name.equals(districtName, ignoreCase = true) }
+        if (district == null) updateMessage("У указанного игрока нет такого здания в городе.")
+        return district
+    }
+
+    private fun canAffordDestruction(player: IPlayer, cost: Int): Boolean {
+        if (player.gold < cost) {
+            updateMessage("Недостаточно золота для разрушения (требуется $cost).")
+            return false
+        }
+        return true
+    }
+
+    private fun performDestruction(
+        activePlayer: IPlayer,
+        targetPlayer: IPlayer,
+        district: IDistrict,
+        cost: Int
+    ) {
+        activePlayer.gold -= cost
         targetPlayer.destroyBuilding(district)
         quarterPool.discardCard(district)
 
         updateMessage("Кондотьер разрушил здание ${district.name} у игрока ${targetPlayer.name}!")
-        _gameState.update { it.copy(phase = GamePhase.BUILD_CHOICE) }
+        logMove(
+            MoveType.DISTRICT_DESTROYED,
+            "Кондотьер разрушил ${district.name} у ${targetPlayer.name}",
+            characterName = "Кондотьер",
+            playerName = activePlayer.name
+        )
+        moveToBuildChoice()
     }
 
     fun openLeaderboard() {
@@ -373,5 +470,36 @@ class GameSession {
 
     fun backToSetup() {
         _gameState.update { it.copy(phase = GamePhase.SETUP_PLAYERS) }
+    }
+
+    private val _moveHistory = mutableListOf<GameLogEntry>()
+    val moveHistory: List<GameLogEntry> get() = _moveHistory.toList()
+    private var currentRound: Int = 1
+    private var moveHistoryVersion = MutableStateFlow(0) // для триггера рекомпозиции
+
+    val historyVersion: StateFlow<Int> = moveHistoryVersion
+
+    private fun logMove(
+        type: MoveType,
+        description: String,
+        characterName: String? = _gameState.value.activeCharacterName.ifBlank { null },
+        playerName: String? = _gameState.value.activePlayer?.name
+    ) {
+        _moveHistory.add(
+            GameLogEntry(
+                round = currentRound,
+                characterName = characterName,
+                playerName = playerName,
+                type = type,
+                description = description
+            )
+        )
+        moveHistoryVersion.value = _moveHistory.size
+    }
+
+    fun resetHistory() {
+        _moveHistory.clear()
+        currentRound = 1
+        moveHistoryVersion.value = 0
     }
 }
