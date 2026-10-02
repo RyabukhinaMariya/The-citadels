@@ -101,13 +101,8 @@ private fun PhaseRouter(state: GameState, session: GameSession) {
         GamePhase.GAME_OVER -> GameOverScreen(state.message)
         GamePhase.SELECT_CARD -> SelectCardScreen { name -> session.confirmSelectedCard(name) }
         GamePhase.LEADERBOARD -> LeaderboardScreen(session)
-        GamePhase.ROUND_START -> RoundStartPlaceholder()
+        else -> error("Unknown phase")
     }
-}
-
-@Composable
-private fun RoundStartPlaceholder() {
-    // При необходимости — экран «Раунд начинается» или просто пусто
 }
 
 @Composable
@@ -206,7 +201,7 @@ private fun LeaderboardButton(onClick: () -> Unit) {
 @Composable
 private fun SetupHeader() {
     Text(
-        "Регистрация участников ($4-7 игроков)",
+        "Регистрация участников (4-7 игроков)",
         color = Color.LightGray,
         fontSize = 20.sp
     )
