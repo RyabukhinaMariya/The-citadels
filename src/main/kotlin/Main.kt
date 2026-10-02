@@ -21,127 +21,262 @@ import engine.GameSession
 import domain.IPlayer
 import domain.IDistrict
 import database.DatabaseManager
+import data.MoveType
+import engine.GameState
 
 fun main() = application {
-    val gameSession = remember { GameSession() }
     DatabaseManager.init()
+    val gameSession = remember { GameSession() }
 
     Window(
         onCloseRequest = ::exitApplication,
         title = "Цитадели — Desktop GUI"
     ) {
-        val state by gameSession.gameState.collectAsState()
+        CitadelApp(gameSession)
+    }
+}
 
-        MaterialTheme {
-            Surface(
-                modifier = Modifier.fillMaxSize(),
-                color = Color(0xFF1E1E2C)
-            ) {
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = state.message,
-                        color = Color.White,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF2D2D44), RoundedCornerShape(8.dp))
-                            .padding(12.dp)
-                    )
+private object AppColors {
+    val Background = Color(0xFF1E1E2C)
+    val CardBackground = Color(0xFF2D2D44)
+    val ButtonSecondary = Color(0xFF5C6BC0)
+}
 
-                    Spacer(modifier = Modifier.height(16.dp))
-                    when (state.phase) {
-                        GamePhase.SETUP_PLAYERS -> SetupScreen(gameSession, state.players)
-                        GamePhase.CHARACTER_CALL -> CharacterCallScreen(gameSession, state.players, state.activeCharacterName)
-                        GamePhase.SPECIAL_ABILITY -> {
-                            val currentRank = state.currentCharacterIndex
-                            AbilityInputScreen(
-                                session = gameSession,
-                                characterName = domain.GameCharacters.getByOrder(currentRank)?.name,
-                                characterRank = currentRank
-                            )
-                        }
-                        GamePhase.ACTION_CHOICE -> ActionChoiceScreen(gameSession, state.activePlayer)
-                        GamePhase.BUILD_CHOICE -> BuildAndAbilityScreen(gameSession, state.activePlayer)
-                        GamePhase.GAME_OVER -> GameOverScreen(state.message)
-                        GamePhase.SELECT_CARD -> SelectCardScreen { selectedCardName -> gameSession.confirmSelectedCard(selectedCardName) }
-                        GamePhase.LEADERBOARD -> LeaderboardScreen(gameSession)
-                        else -> exitApplication()
-                    }
-                }
+@Composable
+private fun GameScreen(
+    state: GameState,
+    session: GameSession,
+    onShowHistory: () -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        GameTopBar(
+            message = state.message,
+            onShowHistory = onShowHistory
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        PhaseRouter(state = state, session = session)
+    }
+}
+
+@Composable
+private fun GameTopBar(message: String, onShowHistory: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        MessageBanner(message = message, modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+            onClick = onShowHistory,
+            colors = ButtonDefaults.buttonColors(backgroundColor = AppColors.ButtonSecondary)
+        ) {
+            Text("История", color = Color.White)
+        }
+    }
+}
+
+@Composable
+private fun PhaseRouter(state: GameState, session: GameSession) {
+    when (state.phase) {
+        GamePhase.SETUP_PLAYERS -> SetupScreen(session, state.players)
+
+        GamePhase.CHARACTER_CALL -> CharacterCallScreen(
+            session = session,
+            players = state.players,
+            characterName = state.activeCharacterName
+        )
+
+        GamePhase.SPECIAL_ABILITY -> AbilityInputScreen(
+            session = session,
+            characterName = domain.GameCharacters.getByOrder(state.currentCharacterIndex)?.name,
+            characterRank = state.currentCharacterIndex
+        )
+
+        GamePhase.ACTION_CHOICE -> ActionChoiceScreen(session, state.activePlayer)
+        GamePhase.BUILD_CHOICE -> BuildAndAbilityScreen(session, state.activePlayer)
+        GamePhase.GAME_OVER -> GameOverScreen(state.message)
+        GamePhase.SELECT_CARD -> SelectCardScreen { name -> session.confirmSelectedCard(name) }
+        GamePhase.LEADERBOARD -> LeaderboardScreen(session)
+        GamePhase.ROUND_START -> RoundStartPlaceholder()
+    }
+}
+
+@Composable
+private fun RoundStartPlaceholder() {
+    // При необходимости — экран «Раунд начинается» или просто пусто
+}
+
+@Composable
+private fun MessageBanner(message: String, modifier: Modifier = Modifier) {
+    Text(
+        text = message,
+        color = Color.White,
+        fontSize = 18.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier
+            .background(AppColors.CardBackground, RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    )
+}
+
+@Composable
+private fun CitadelApp(session: GameSession) {
+    val state by session.gameState.collectAsState()
+    val historyVersion by session.historyVersion.collectAsState()
+    var showHistory by remember { mutableStateOf(false) }
+    val history = remember(historyVersion) { session.moveHistory }
+
+    MaterialTheme {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = AppColors.Background
+        ) {
+            if (showHistory) {
+                MoveHistoryScreen(entries = history, onClose = { showHistory = false })
+            } else {
+                GameScreen(
+                    state = state,
+                    session = session,
+                    onShowHistory = { showHistory = true }
+                )
             }
         }
     }
+}
+
+private object SetupDimens {
+    val SectionSpacing = 12.dp
+    val ListSpacing = 20.dp
+    val ButtonSpacing = 12.dp
+    val LeaderboardBottomPadding = 20.dp
 }
 
 // 1. Register screen
 @Composable
 fun SetupScreen(session: GameSession, players: List<IPlayer>) {
-    var nameInput by remember { mutableStateOf("") }
-
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxSize()
     ) {
-        Button(
-            onClick = { session.openLeaderboard() },
-            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF7E57C2)),
-            modifier = Modifier.padding(bottom = 20.dp)
-        ) {
-            Text("Результаты игр / Рейтинг", color = Color.White)
-        }
+        LeaderboardButton(onClick = session::openLeaderboard)
 
-        Text("Регистрация участников (4-7 игроков)", color = Color.LightGray, fontSize = 20.sp)
-        Spacer(modifier = Modifier.height(12.dp))
+        SetupHeader()
 
-        OutlinedTextField(
+        var nameInput by remember { mutableStateOf("") }
+
+        PlayerNameField(
             value = nameInput,
-            onValueChange = { nameInput = it },
-            label = { Text("Имя игрока") },
-            singleLine = true,
-            colors = TextFieldDefaults.outlinedTextFieldColors(
-                textColor = Color.White,
-                focusedBorderColor = Color(0xFFFFB74D),
-                unfocusedBorderColor = Color.Gray
-            )
+            onValueChange = { nameInput = it }
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(SetupDimens.SectionSpacing))
 
-        Row {
-            Button(
-                onClick = {
-                    session.addPlayer(nameInput)
-                    nameInput = ""
-                },
-                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50))
-            ) {
-                Text("Добавить", color = Color.White)
-            }
+        SetupActions(
+            nameInput = nameInput,
+            playersCount = players.size,
+            onAddPlayer = {
+                session.addPlayer(nameInput)
+                nameInput = ""
+            },
+            onStartGame = session::startGame
+        )
 
-            Spacer(modifier = Modifier.width(12.dp))
+        Spacer(modifier = Modifier.height(SetupDimens.SectionSpacing))
 
-            if (players.size >= 4) {
-                Button(
-                    onClick = { session.startGame() },
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFFF9800))
-                ) {
-                    Text("Начать игру (${players.size})", color = Color.White)
-                }
-            }
-        }
+        RegisteredPlayersList(players)
+    }
+}
 
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("Зарегистрированы:", color = Color.Gray)
-        players.forEach { p ->
-            Text("• ${p.name}", color = Color.White, fontSize = 16.sp)
+@Composable
+private fun LeaderboardButton(onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF7E57C2)),
+        modifier = Modifier.padding(bottom = SetupDimens.LeaderboardBottomPadding)
+    ) {
+        Text("Результаты игр / Рейтинг", color = Color.White)
+    }
+}
+
+@Composable
+private fun SetupHeader() {
+    Text(
+        "Регистрация участников ($4-7 игроков)",
+        color = Color.LightGray,
+        fontSize = 20.sp
+    )
+    Spacer(modifier = Modifier.height(SetupDimens.SectionSpacing))
+}
+
+@Composable
+private fun PlayerNameField(value: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text("Имя игрока") },
+        singleLine = true,
+        colors = setupTextFieldColors()
+    )
+}
+
+@Composable
+private fun SetupActions(
+    nameInput: String,
+    playersCount: Int,
+    onAddPlayer: () -> Unit,
+    onStartGame: () -> Unit
+) {
+    Row {
+        AddPlayerButton(onClick = onAddPlayer)
+        Spacer(modifier = Modifier.width(SetupDimens.ButtonSpacing))
+        if (playersCount >= 4) {
+            StartGameButton(playersCount = playersCount, onClick = onStartGame)
         }
     }
 }
+
+@Composable
+private fun AddPlayerButton(onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50))
+    ) {
+        Text("Добавить", color = Color.White)
+    }
+}
+
+@Composable
+private fun StartGameButton(playersCount: Int, onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFFF9800))
+    ) {
+        Text("Начать игру ($playersCount)", color = Color.White)
+    }
+}
+
+@Composable
+private fun RegisteredPlayersList(players: List<IPlayer>) {
+    Text("Зарегистрированы:", color = Color.Gray)
+    players.forEach { player -> PlayerRow(player.name) }
+}
+
+@Composable
+private fun PlayerRow(name: String) {
+    Text("• $name", color = Color.White, fontSize = 16.sp)
+}
+
+@Composable
+private fun setupTextFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
+    textColor = Color.White,
+    focusedBorderColor = Color(0xFFFFB74D),
+    unfocusedBorderColor = Color.Gray
+)
 
 @Composable
 fun LeaderboardScreen(session: GameSession) {
@@ -152,7 +287,7 @@ fun LeaderboardScreen(session: GameSession) {
         modifier = Modifier.fillMaxSize().padding(16.dp)
     ) {
         Text(
-            text = "🏆 Таблица лидеров",
+            text = "Таблица лидеров",
             color = Color(0xFFFFD54F),
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold
@@ -189,7 +324,7 @@ fun LeaderboardScreen(session: GameSession) {
                     ) {
                         Text(stats.name, color = Color.White, modifier = Modifier.weight(2f))
                         Text("${stats.gamesPlayed}", color = Color.LightGray, modifier = Modifier.weight(1f))
-                        Text("${stats.wins} 🥇", color = Color(0xFFFFD700), modifier = Modifier.weight(1f))
+                        Text("${stats.wins}", color = Color(0xFFFFD700), modifier = Modifier.weight(1f))
                     }
                 }
             }
@@ -365,104 +500,122 @@ fun GameOverScreen(results: String) {
 }
 
 @Composable
-fun SelectCardScreen(
-    onCardSelected: (String) -> Unit
-) {
+fun SelectCardScreen(onCardSelected: (String) -> Unit) {
     var cardNameInput by remember { mutableStateOf("") }
     var errorMessage by remember { mutableStateOf("") }
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp)
+        modifier = Modifier.fillMaxSize().padding(24.dp)
     ) {
         Card(
             backgroundColor = Color(0xFF2D2D44),
             shape = RoundedCornerShape(12.dp),
             elevation = 8.dp,
-            modifier = Modifier
-                .fillMaxWidth(0.6f)
-                .padding(16.dp)
+            modifier = Modifier.fillMaxWidth(0.6f).padding(16.dp)
         ) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.padding(24.dp)
             ) {
-                Text(
-                    text = "Выбор карты",
-                    color = Color(0xFFFFD54F),
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "Введите точное название карты квартала:",
-                    color = Color.LightGray,
-                    fontSize = 14.sp
-                )
-
+                SelectCardHeader()
                 Spacer(modifier = Modifier.height(20.dp))
-
-                // card name field
-                OutlinedTextField(
+                CardNameField(
                     value = cardNameInput,
                     onValueChange = {
                         cardNameInput = it
                         if (errorMessage.isNotEmpty()) errorMessage = ""
-                    },
-                    label = { Text("Название карты") },
-                    singleLine = true,
-                    colors = TextFieldDefaults.outlinedTextFieldColors(
-                        textColor = Color.White,
-                        focusedBorderColor = Color(0xFFFFB74D),
-                        unfocusedBorderColor = Color.Gray,
-                        focusedLabelColor = Color(0xFFFFB74D),
-                        cursorColor = Color(0xFFFFB74D)
-                    ),
-                    modifier = Modifier.fillMaxWidth()
+                    }
                 )
-
-                if (errorMessage.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = errorMessage,
-                        color = Color(0xFFE53935),
-                        fontSize = 12.sp
-                    )
-                }
-
+                ErrorMessage(errorMessage)
                 Spacer(modifier = Modifier.height(24.dp))
-
-                //apply button
-                Button(
+                ConfirmCardButton(
                     onClick = {
-                        if (cardNameInput.trim().isEmpty()) {
-                            errorMessage = "Название карты не может быть пустым!"
-                        } else {
-                            onCardSelected(cardNameInput.trim())
-                            cardNameInput = ""
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Text(
-                        text = "Подтвердить выбор",
-                        color = Color.White,
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                        errorMessage = handleCardSubmit(cardNameInput, onCardSelected)
+                        if (errorMessage.isEmpty()) cardNameInput = ""
+                    }
+                )
             }
         }
     }
+}
+
+@Composable
+private fun SelectCardHeader() {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = "Выбор карты",
+            color = Color(0xFFFFD54F),
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            text = "Введите точное название карты квартала:",
+            color = Color.LightGray,
+            fontSize = 14.sp
+        )
+    }
+}
+
+@Composable
+private fun CardNameField(value: String, onValueChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text("Название карты") },
+        singleLine = true,
+        colors = selectCardFieldColors(),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun ErrorMessage(message: String) {
+    if (message.isEmpty()) return
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(text = message, color = Color(0xFFE53935), fontSize = 12.sp)
+}
+
+@Composable
+private fun ConfirmCardButton(onClick: () -> Unit) {
+    Button(
+        onClick = onClick,
+        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50)),
+        modifier = Modifier.fillMaxWidth().height(48.dp),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Text(
+            text = "Подтвердить выбор",
+            color = Color.White,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+private fun selectCardFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
+    textColor = Color.White,
+    focusedBorderColor = Color(0xFFFFB74D),
+    unfocusedBorderColor = Color.Gray,
+    focusedLabelColor = Color(0xFFFFB74D),
+    cursorColor = Color(0xFFFFB74D)
+)
+
+/**
+ * Возвращает текст ошибки или пустую строку, если всё ок.
+ * Вынесено из composable — легко тестируется.
+ */
+private fun handleCardSubmit(
+    input: String,
+    onCardSelected: (String) -> Unit
+): String {
+    val trimmed = input.trim()
+    if (trimmed.isEmpty()) return "Название карты не может быть пустым!"
+    onCardSelected(trimmed)
+    return ""
 }
 
 @Composable
@@ -475,140 +628,176 @@ fun AbilityInputScreen(
     var extraInput by remember { mutableStateOf("") }
 
     Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF1E1E2C)),
+        modifier = Modifier.fillMaxSize().background(Color(0xFF1E1E2C)),
         contentAlignment = Alignment.Center
     ) {
         Card(
-            modifier = Modifier
-                .fillMaxWidth(0.85f)
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth(0.85f).padding(16.dp),
             shape = RoundedCornerShape(16.dp),
             backgroundColor = Color(0xFF2D2D44),
             elevation = 8.dp
         ) {
             Column(
-                modifier = Modifier
-                    .padding(24.dp)
-                    .fillMaxWidth(),
+                modifier = Modifier.padding(24.dp).fillMaxWidth(),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                Text(
-                    text = "Способность персонажа",
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
+                AbilityHeader(characterName)
+                AbilityInputFields(
+                    characterRank = characterRank,
+                    targetInput = targetInput,
+                    onTargetChange = { targetInput = it },
+                    extraInput = extraInput,
+                    onExtraChange = { extraInput = it }
                 )
-
-                if (characterName != null) {
-                    Text(
-                        text = "Вы играете за: $characterName",
-                        fontSize = 16.sp,
-                        color = Color(0xFFFFD700)
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                when (characterRank) {
-                    3 -> { // Чародей
-                        Text(
-                            text = "Обмен картами с другим игроком",
-                            color = Color.LightGray,
-                            fontSize = 14.sp
-                        )
-                        OutlinedTextField(
-                            value = targetInput,
-                            onValueChange = { targetInput = it },
-                            label = { Text("На кого вы воздействуете") },
-                            placeholder = { Text("Введите ник игрока") },
-                            singleLine = true,
-                            colors = textFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                AbilityActionButtons(
+                    onSkip = { session.skipAbility() },
+                    onConfirm = {
+                        submitAbility(session, characterRank, targetInput, extraInput)
                     }
-                    1 -> { // Ассасин
-                        OutlinedTextField(
-                            value = targetInput,
-                            onValueChange = { targetInput = it },
-                            label = { Text("Ранг персонажа для убийства (2-8) или 0") },
-                            singleLine = true,
-                            colors = textFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    2 -> { // Вор
-                        OutlinedTextField(
-                            value = targetInput,
-                            onValueChange = { targetInput = it },
-                            label = { Text("Ранг персонажа для ограбления (2-8)") },
-                            singleLine = true,
-                            colors = textFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    8 -> { // Кондотьер
-                        OutlinedTextField(
-                            value = targetInput,
-                            onValueChange = { targetInput = it },
-                            label = { Text("На кого вы воздействуете (ник игрока)") },
-                            singleLine = true,
-                            colors = textFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = extraInput,
-                            onValueChange = { extraInput = it },
-                            label = { Text("Название здания для разрушения") },
-                            singleLine = true,
-                            colors = textFieldColors(),
-                            modifier = Modifier.fillMaxWidth()
-                        )
-                    }
-                    else -> {
-                        Text("У этой роли нет активной цели.", color = Color.Gray)
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Button(
-                        onClick = { session.skipAbility() },
-                        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF757575)),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    ) {
-                        Text("Пропустить", color = Color.White, fontSize = 16.sp)
-                    }
-
-                    Spacer(modifier = Modifier.width(16.dp))
-
-                    Button(
-                        onClick = {
-                            when (characterRank) {
-                                3 -> if (targetInput.isNotBlank()) session.applySorcererSwap(targetInput.trim())
-                                1 -> targetInput.toIntOrNull()?.let { session.applyAssassinAbility(it) }
-                                2 -> targetInput.toIntOrNull()?.let { session.applyThiefAbility(it) }
-                                8 -> if (targetInput.isNotBlank() && extraInput.isNotBlank()) {
-                                    session.applyWarlordDestroy(targetInput.trim(), extraInput.trim())
-                                }
-                                else -> session.skipAbility()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50)),
-                        modifier = Modifier.weight(1f).height(48.dp)
-                    ) {
-                        Text("Подтвердить", color = Color.White, fontSize = 16.sp)
-                    }
-                }
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun AbilityHeader(characterName: String?) {
+    Text(
+        "Способность персонажа",
+        fontSize = 22.sp,
+        fontWeight = FontWeight.Bold,
+        color = Color.White
+    )
+    characterName?.let {
+        Text("Вы играете за: $it", fontSize = 16.sp, color = Color(0xFFFFD700))
+    }
+}
+
+@Composable
+private fun AbilityInputFields(
+    characterRank: Int,
+    targetInput: String,
+    onTargetChange: (String) -> Unit,
+    extraInput: String,
+    onExtraChange: (String) -> Unit
+) {
+    when (characterRank) {
+        3 -> SorcererFields(targetInput, onTargetChange)
+        1 -> AssassinFields(targetInput, onTargetChange)
+        2 -> ThiefFields(targetInput, onTargetChange)
+        8 -> WarlordFields(targetInput, onTargetChange, extraInput, onExtraChange)
+        else -> Text("У этой роли нет активной цели.", color = Color.Gray)
+    }
+}
+
+@Composable
+private fun SorcererFields(value: String, onChange: (String) -> Unit) {
+    Text("Обмен картами с другим игроком", color = Color.LightGray, fontSize = 14.sp)
+    AbilityTextField(
+        value = value,
+        onValueChange = onChange,
+        label = "На кого вы воздействуете",
+        placeholder = "Введите ник игрока"
+    )
+}
+
+@Composable
+private fun AssassinFields(value: String, onChange: (String) -> Unit) {
+    AbilityTextField(
+        value = value,
+        onValueChange = onChange,
+        label = "Ранг персонажа для убийства (2-8) или 0"
+    )
+}
+
+@Composable
+private fun ThiefFields(value: String, onChange: (String) -> Unit) {
+    AbilityTextField(
+        value = value,
+        onValueChange = onChange,
+        label = "Ранг персонажа для ограбления (2-8)"
+    )
+}
+
+@Composable
+private fun WarlordFields(
+    targetValue: String,
+    onTargetChange: (String) -> Unit,
+    extraValue: String,
+    onExtraChange: (String) -> Unit
+) {
+    AbilityTextField(
+        value = targetValue,
+        onValueChange = onTargetChange,
+        label = "На кого вы воздействуете (ник игрока)"
+    )
+    AbilityTextField(
+        value = extraValue,
+        onValueChange = onExtraChange,
+        label = "Название здания для разрушения"
+    )
+}
+
+@Composable
+private fun AbilityTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    label: String,
+    placeholder: String? = null
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        label = { Text(label) },
+        placeholder = placeholder?.let { { Text(it) } },
+        singleLine = true,
+        colors = textFieldColors(),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+@Composable
+private fun AbilityActionButtons(
+    onSkip: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Button(
+            onClick = onSkip,
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF757575)),
+            modifier = Modifier.weight(1f).height(48.dp)
+        ) {
+            Text("Пропустить", color = Color.White, fontSize = 16.sp)
+        }
+        Spacer(modifier = Modifier.width(16.dp))
+        Button(
+            onClick = onConfirm,
+            colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF4CAF50)),
+            modifier = Modifier.weight(1f).height(48.dp)
+        ) {
+            Text("Подтвердить", color = Color.White, fontSize = 16.sp)
+        }
+    }
+}
+
+private fun submitAbility(
+    session: GameSession,
+    characterRank: Int,
+    targetInput: String,
+    extraInput: String
+) {
+    when (characterRank) {
+        3 -> if (targetInput.isNotBlank()) session.applySorcererSwap(targetInput.trim())
+        1 -> targetInput.toIntOrNull()?.let { session.applyAssassinAbility(it) }
+        2 -> targetInput.toIntOrNull()?.let { session.applyThiefAbility(it) }
+        8 -> if (targetInput.isNotBlank() && extraInput.isNotBlank()) {
+            session.applyWarlordDestroy(targetInput.trim(), extraInput.trim())
+        }
+        else -> session.skipAbility()
     }
 }
 
@@ -620,3 +809,97 @@ private fun textFieldColors() = TextFieldDefaults.outlinedTextFieldColors(
     cursorColor = Color(0xFF4CAF50),
     focusedLabelColor = Color(0xFF4CAF50)
 )
+
+@Composable
+fun MoveHistoryScreen(
+    entries: List<data.GameLogEntry>,
+    onClose: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "История ходов (${entries.size})",
+                color = Color(0xFFFFD54F),
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Button(
+                onClick = onClose,
+                colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFFE53935))
+            ) {
+                Text("Закрыть", color = Color.White)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        if (entries.isEmpty()) {
+            Text("Ходов пока не было", color = Color.Gray)
+        } else {
+            androidx.compose.foundation.lazy.LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.fillMaxSize()
+            ) {
+                items(entries) { entry ->
+                    HistoryRow(entry)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HistoryRow(entry: data.GameLogEntry) {
+    val color = when (entry.type) {
+        MoveType.PLAYER_KILLED, MoveType.DISTRICT_DESTROYED -> Color(0xFFE53935)
+        MoveType.PLAYER_ROBBED -> Color(0xFFFF7043)
+        MoveType.DISTRICT_BUILT -> Color(0xFF66BB6A)
+        MoveType.GOLD_TAKEN, MoveType.CARD_DRAWN -> Color(0xFFFFD54F)
+        MoveType.GAME_OVER -> Color(0xFFAB47BC)
+        MoveType.CHARACTER_CALLED, MoveType.CHARACTER_SKIPPED -> Color(0xFF42A5F5)
+        else -> Color.LightGray
+    }
+
+    Card(
+        backgroundColor = Color(0xFF2D2D44),
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "Р${entry.round}",
+                color = Color(0xFF9575CD),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.width(40.dp)
+            )
+            Text(
+                entry.formatTime(),
+                color = Color.Gray,
+                fontSize = 12.sp,
+                modifier = Modifier.width(70.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(entry.description, color = color, fontSize = 14.sp)
+                if (entry.characterName != null || entry.playerName != null) {
+                    Text(
+                        listOfNotNull(entry.characterName, entry.playerName)
+                            .joinToString(" · "),
+                        color = Color.Gray,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        }
+    }
+}
