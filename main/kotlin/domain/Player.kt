@@ -1,6 +1,7 @@
 package domain
 
-interface IPlayer: ICard {
+interface IPlayer {
+    val name: String
     val id: Int
     var gold: Int
     val hand: List<IDistrict>
@@ -14,7 +15,8 @@ interface IPlayer: ICard {
     fun build(district: IDistrict)
 }
 
-class Player(override val name: String, override val id: Int) : IPlayer {
+class Player(override val id: Int) : IPlayer {
+    override val name = ""
     override var gold: Int = 2
     override val hand = mutableListOf<IDistrict>()
     override val city = mutableListOf<IDistrict>()
