@@ -1,7 +1,5 @@
 package engine
 
-import database.DatabaseManager
-import database.DatabaseManager.addResults
 import domain.GameCharacters.getByOrder
 import domain.IDistrict
 import domain.IPlayer
@@ -64,7 +62,6 @@ class GameSession {
 
         val player = Player(name = name, id = _players.size + 1)
         _players.add(player)
-        DatabaseManager.registerOrGetPlayer(name)
 
         val available = quarterPool.getAvailableCards()
         for (i in 0..3) {
@@ -293,14 +290,6 @@ class GameSession {
         val winner = _players.firstOrNull()
         val winnerScore = winner?.city?.sumOf { it.cost } ?: 0
 
-        if (winner != null) {
-            addResults(
-                players = _players,
-                winner = winner,
-                score = winnerScore
-            )
-        }
-
         logMove(
             MoveType.GAME_OVER,
             "Игра окончена. Победитель: ${winner?.name} (${winnerScore} очков)",
@@ -453,8 +442,7 @@ class GameSession {
     private val _moveHistory = mutableListOf<GameLogEntry>()
     val moveHistory: List<GameLogEntry> get() = _moveHistory.toList()
     private var currentRound: Int = 1
-    private var moveHistoryVersion = MutableStateFlow(0) // для триггера рекомпозиции
-
+    private var moveHistoryVersion = MutableStateFlow(0)
     val historyVersion: StateFlow<Int> = moveHistoryVersion
 
     private fun logMove(
@@ -473,11 +461,5 @@ class GameSession {
             )
         )
         moveHistoryVersion.value = _moveHistory.size
-    }
-
-    fun resetHistory() {
-        _moveHistory.clear()
-        currentRound = 1
-        moveHistoryVersion.value = 0
     }
 }
