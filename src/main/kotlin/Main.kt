@@ -20,12 +20,10 @@ import engine.GamePhase
 import engine.GameSession
 import domain.IPlayer
 import domain.IDistrict
-import database.DatabaseManager
 import data.MoveType
 import engine.GameState
 
 fun main() = application {
-    DatabaseManager.init()
     val gameSession = remember { GameSession() }
 
     Window(
@@ -156,7 +154,6 @@ fun SetupScreen(session: GameSession, players: List<IPlayer>) {
         verticalArrangement = Arrangement.Center,
         modifier = Modifier.fillMaxSize()
     ) {
-        LeaderboardButton(onClick = session::openLeaderboard)
 
         SetupHeader()
 
@@ -182,17 +179,6 @@ fun SetupScreen(session: GameSession, players: List<IPlayer>) {
         Spacer(modifier = Modifier.height(SetupDimens.SectionSpacing))
 
         RegisteredPlayersList(players)
-    }
-}
-
-@Composable
-private fun LeaderboardButton(onClick: () -> Unit) {
-    Button(
-        onClick = onClick,
-        colors = ButtonDefaults.buttonColors(backgroundColor = Color(0xFF7E57C2)),
-        modifier = Modifier.padding(bottom = SetupDimens.LeaderboardBottomPadding)
-    ) {
-        Text("Результаты игр / Рейтинг", color = Color.White)
     }
 }
 
